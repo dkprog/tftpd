@@ -20,15 +20,14 @@ const (
 )
 
 type RequestPacket struct {
-	opcode   uint16
 	filename string
 	mode     string
 }
 
-func (rrq RequestPacket) MarshalBinary() (data []byte, err error) {
+func (rrq RequestPacket) MarshalBinary() ([]byte, error) {
 	var packet bytes.Buffer
 	var opcode [2]byte
-	binary.BigEndian.PutUint16(opcode[:], rrq.opcode)
+	binary.BigEndian.PutUint16(opcode[:], RRQ)
 	packet.Write(opcode[:])
 	packet.Write([]byte(rrq.filename))
 	packet.Write([]byte{0})
@@ -38,7 +37,6 @@ func (rrq RequestPacket) MarshalBinary() (data []byte, err error) {
 }
 
 type DataPacket struct {
-	opcode      uint16
 	blockNumber uint16
 	data        []byte
 	length      int
@@ -48,11 +46,29 @@ func (pkt *DataPacket) UnmarshalBinary(data []byte) error {
 	if len(data) < 5 {
 		return errors.New("too small packet")
 	}
-	pkt.opcode = binary.BigEndian.Uint16(data[0:])
+	opcode := binary.BigEndian.Uint16(data[0:])
+	if opcode != DATA {
+		return errors.New("invalid packet type")
+	}
 	pkt.blockNumber = binary.BigEndian.Uint16(data[2:])
 	pkt.data = data[4:]
 	pkt.length = len(pkt.data)
 	return nil
+}
+
+type AckPacket struct {
+	blockNumber uint16
+}
+
+func (ack AckPacket) MarshalBinary() ([]byte, error) {
+	var opcode [2]byte
+	binary.BigEndian.PutUint16(opcode[:], ACK)
+	var blockNumber [2]byte
+	binary.BigEndian.PutUint16(blockNumber[:], ack.blockNumber)
+	var packet bytes.Buffer
+	packet.Write(opcode[:])
+	packet.Write(blockNumber[:])
+	return packet.Bytes(), nil
 }
 
 func TestReadReceiveFirstChunk(t *testing.T) {
@@ -72,11 +88,6 @@ func TestReadReceiveFirstChunk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if data.opcode != DATA {
-		t.Fatalf("Invalid packet type of %v. It was expected DATA (%v).",
-			data.opcode, DATA)
-	}
-
 	if data.blockNumber != 1 {
 		t.Fatalf("Invalid block number of %v. It was expected to get the first (1)",
 			data.blockNumber)
@@ -90,6 +101,10 @@ func TestReadReceiveFirstChunk(t *testing.T) {
 }
 
 func TestReadReceiveSecondChunkAfterAck(t *testing.T) {
+
+}
+
+func TestReadReceiveFirstChunkAgainIfNotAck(t *testing.T) {
 
 }
 
@@ -108,7 +123,7 @@ func sendReadRequest() (conn net.PacketConn, err error) {
 		return conn, err
 	}
 
-	rrq := RequestPacket{RRQ, "video.avi", "octet"}
+	rrq := RequestPacket{"video.avi", "octet"}
 	packet, err := rrq.MarshalBinary()
 	if err != nil {
 		return conn, err
