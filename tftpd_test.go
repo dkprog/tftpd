@@ -37,6 +37,21 @@ func (rrq RequestPacket) MarshalBinary() (data []byte, err error) {
 	return packet.Bytes(), nil
 }
 
+type DataPacket struct {
+	opcode      uint16
+	blockNumber uint16
+	data        []byte
+	length      int
+}
+
+func (pkt *DataPacket) UnmarshalBinary(data []byte) error {
+	pkt.opcode = binary.BigEndian.Uint16(data[0:])
+	pkt.blockNumber = binary.BigEndian.Uint16(data[2:])
+	pkt.data = data[4:]
+	pkt.length = len(pkt.data)
+	return nil
+}
+
 func TestReadRequest(t *testing.T) {
 	conn, err := net.ListenPacket("udp", ":0")
 	if err != nil {
@@ -58,10 +73,13 @@ func TestReadRequest(t *testing.T) {
 	}
 
 	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
-	buf := make([]byte, 1024)
+	buf := make([]byte, 516)
 	n, addrFrom, err := conn.ReadFrom(buf)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fmt.Print(n, addrFrom, buf)
+	var data DataPacket
+	data.UnmarshalBinary(buf[:n])
+	fmt.Print(data)
 }
