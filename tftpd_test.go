@@ -43,7 +43,7 @@ type DataPacket struct {
 }
 
 func (pkt *DataPacket) UnmarshalBinary(data []byte) error {
-	if len(data) < 5 {
+	if len(data) < 4 {
 		return errors.New("too small packet")
 	}
 	opcode := binary.BigEndian.Uint16(data[0:])
@@ -77,13 +77,13 @@ func TestReadReceiveFirstChunk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, buf, _, err := readPacket(conn)
+	_, buf, n, err := readPacket(conn)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var data DataPacket
-	err = data.UnmarshalBinary(buf)
+	err = data.UnmarshalBinary(buf[:n])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,30 +106,30 @@ func TestReadReceiveSecondChunkAfterAck(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	addr, buf, _, err := readPacket(conn)
+	addr, buf, n, err := readPacket(conn)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var first DataPacket
-	err = first.UnmarshalBinary(buf)
+	err = first.UnmarshalBinary(buf[:n])
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	var ack = AckPacket{first.blockNumber}
+	ack := AckPacket{first.blockNumber}
 	_, err = sendAck(ack, addr, conn)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, buf, _, err = readPacket(conn)
+	_, buf, n, err = readPacket(conn)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var second DataPacket
-	err = second.UnmarshalBinary(buf)
+	err = second.UnmarshalBinary(buf[:n])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,13 +151,13 @@ func TestReadReceiveFirstChunkAgainIfNotAck(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, buf, _, err := readPacket(conn)
+	_, buf, n, err := readPacket(conn)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var data DataPacket
-	err = data.UnmarshalBinary(buf)
+	err = data.UnmarshalBinary(buf[:n])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,8 +168,45 @@ func TestReadReceiveFirstChunkAgainIfNotAck(t *testing.T) {
 	}
 }
 
-func TestReadReceiveLastChunk(t *testing.T) {
+func TestReadReceiveEntireFile(t *testing.T) {
+	conn, err := sendReadRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
 
+	lastBlockNumber := uint16(0)
+
+	for {
+		addr, buf, n, err := readPacket(conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var data DataPacket
+		err = data.UnmarshalBinary(buf[:n])
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if data.blockNumber != (lastBlockNumber + 1) {
+			t.Fatalf("Invalid block number of %v. It was expected block %v.",
+				data.blockNumber, lastBlockNumber+1)
+		}
+
+		lastBlockNumber++
+
+		t.Logf("Received block %v of %v bytes.", data.blockNumber, data.length)
+
+		if data.length < 512 {
+			break
+		}
+
+		ack := AckPacket{data.blockNumber}
+		_, err = sendAck(ack, addr, conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func sendReadRequest() (conn net.PacketConn, err error) {
