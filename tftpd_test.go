@@ -2,14 +2,17 @@ package main
 
 import (
 	"bytes"
+	"crypto/md5"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"net"
 	"testing"
 	"time"
 )
 
 const ServerAddr = "127.0.0.1:69"
+const VideoFileMD5Hash = "edda8bd80133569937aeef64ebbf4f0c"
 
 const (
 	RRQ   = 1
@@ -175,6 +178,7 @@ func TestReadReceiveEntireFile(t *testing.T) {
 	}
 
 	lastBlockNumber := uint16(0)
+	hash := md5.New()
 
 	for {
 		addr, buf, n, err := readPacket(conn)
@@ -197,6 +201,8 @@ func TestReadReceiveEntireFile(t *testing.T) {
 
 		t.Logf("Received block %v of %v bytes.", data.blockNumber, data.length)
 
+		hash.Write(data.data)
+
 		if data.length < 512 {
 			break
 		}
@@ -206,6 +212,11 @@ func TestReadReceiveEntireFile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+
+	var receivedFileHashString = fmt.Sprintf("%x", hash.Sum(nil))
+	if receivedFileHashString != VideoFileMD5Hash {
+		t.Fatalf("Invalid file hash: %v. Expected %v.", receivedFileHashString, VideoFileMD5Hash)
 	}
 }
 
