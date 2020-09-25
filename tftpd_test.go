@@ -141,7 +141,31 @@ func TestReadReceiveSecondChunkAfterAck(t *testing.T) {
 }
 
 func TestReadReceiveFirstChunkAgainIfNotAck(t *testing.T) {
+	conn, err := sendReadRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
 
+	_, _, _, err = readPacket(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, buf, _, err := readPacket(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var data DataPacket
+	err = data.UnmarshalBinary(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if data.blockNumber != 1 {
+		t.Fatalf("Invalid block number of %v. It was expected to get the first one (1) again.",
+			data.blockNumber)
+	}
 }
 
 func TestReadReceiveLastChunk(t *testing.T) {
@@ -175,7 +199,7 @@ func sendReadRequest() (conn net.PacketConn, err error) {
 
 func readPacket(conn net.PacketConn) (addr net.Addr, buf []byte, n int, err error) {
 	buf = make([]byte, 516)
-	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 
 	n, addr, err = conn.ReadFrom(buf)
 	return addr, buf, n, err
