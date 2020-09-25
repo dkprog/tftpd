@@ -74,6 +74,24 @@ func (ack AckPacket) MarshalBinary() ([]byte, error) {
 	return packet.Bytes(), nil
 }
 
+type ErrorPacket struct {
+	code    uint16
+	message string
+}
+
+func (errPkt ErrorPacket) UnmarshalBinary(data []byte) error {
+	if len(data) < 4 {
+		return errors.New("too small packet")
+	}
+	opcode := binary.BigEndian.Uint16(data[0:])
+	if opcode != ERROR {
+		return errors.New("invalid packet type")
+	}
+	errPkt.code = binary.BigEndian.Uint16(data[2:])
+	errPkt.message = string(data[4:])
+	return nil
+}
+
 func TestReadReceiveFirstChunk(t *testing.T) {
 	conn, err := sendReadRequest()
 	if err != nil {
@@ -218,6 +236,10 @@ func TestReadReceiveEntireFile(t *testing.T) {
 	if receivedFileHashString != VideoFileMD5Hash {
 		t.Fatalf("Invalid file hash: %v. Expected %v.", receivedFileHashString, VideoFileMD5Hash)
 	}
+}
+
+func TestReadErrorFileNotFound(t *testing.T) {
+
 }
 
 func sendReadRequest() (conn net.PacketConn, err error) {
