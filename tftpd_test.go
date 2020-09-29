@@ -6,7 +6,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
+	"os"
 	"testing"
 	"time"
 )
@@ -101,6 +103,29 @@ func (errPkt *ErrorPacket) UnmarshalBinary(data []byte) error {
 	errPkt.code = binary.BigEndian.Uint16(data[2:])
 	errPkt.message = string(data[4:])
 	return nil
+}
+
+var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+var remoteFileName string
+
+func TestMain(m *testing.M) {
+	rand.Seed(time.Now().UnixNano())
+	remoteFileName = "video-" + randSeq(10) + ".avi"
+
+	os.Exit(m.Run())
+}
+
+func randSeq(n int) string {
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(b)
+}
+
+func TestWriteSendEntireFile(t *testing.T) {
+	t.Log(remoteFileName)
+
 }
 
 func TestReadReceiveFirstChunk(t *testing.T) {
@@ -279,6 +304,11 @@ func TestReadErrorFileNotFound(t *testing.T) {
 func sendReadRequest() (conn net.PacketConn, err error) {
 	rrq := RequestPacket{"video.avi", "octet"}
 	return sendRequest(rrq)
+}
+
+func sendWriteRequest() (conn net.PacketConn, err error) {
+	wrq := RequestPacket{remoteFileName, "octet"}
+	return sendRequest(wrq)
 }
 
 func sendRequest(req RequestPacket) (conn net.PacketConn, err error) {
