@@ -22,6 +22,17 @@ const (
 	ERROR = 5
 )
 
+const (
+	UnknownError                      = 0
+	ErrorFileNotFound                 = 1
+	ErrorAcessViolation               = 2
+	ErrorDiskFullOrAllocationExceeded = 3
+	ErrorIllegalTftpOperation         = 4
+	ErrorUnknownTID                   = 5
+	ErrorFileAlreadyExists            = 6
+	ErrorNoUser                       = 7
+)
+
 type RequestPacket struct {
 	filename string
 	mode     string
@@ -79,7 +90,7 @@ type ErrorPacket struct {
 	message string
 }
 
-func (errPkt ErrorPacket) UnmarshalBinary(data []byte) error {
+func (errPkt *ErrorPacket) UnmarshalBinary(data []byte) error {
 	if len(data) < 4 {
 		return errors.New("too small packet")
 	}
@@ -239,10 +250,38 @@ func TestReadReceiveEntireFile(t *testing.T) {
 }
 
 func TestReadErrorFileNotFound(t *testing.T) {
+	rrq := RequestPacket{"not-found-video.avi", "octet"}
 
+	conn, err := sendRequest(rrq)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, buf, n, err := readPacket(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var error ErrorPacket
+	err = error.UnmarshalBinary(buf[:n])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("Received ERROR packet with message: %v", error.message)
+
+	if error.code != ErrorFileNotFound {
+		t.Fatalf("Invalid error code: %v. Expected %v (ErrorFileNotFound).",
+			error.code, ErrorFileNotFound)
+	}
 }
 
 func sendReadRequest() (conn net.PacketConn, err error) {
+	rrq := RequestPacket{"video.avi", "octet"}
+	return sendRequest(rrq)
+}
+
+func sendRequest(req RequestPacket) (conn net.PacketConn, err error) {
 	conn, err = net.ListenPacket("udp", ":0")
 	if err != nil {
 		return nil, err
@@ -253,8 +292,7 @@ func sendReadRequest() (conn net.PacketConn, err error) {
 		return conn, err
 	}
 
-	rrq := RequestPacket{"video.avi", "octet"}
-	packet, err := rrq.MarshalBinary()
+	packet, err := req.MarshalBinary()
 	if err != nil {
 		return conn, err
 	}
