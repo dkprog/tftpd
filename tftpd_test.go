@@ -395,7 +395,7 @@ func TestReadErrorFileNotFound(t *testing.T) {
 }
 
 func sendReadRequest() (conn net.PacketConn, err error) {
-	rrq := RequestPacket{RRQ, "video.avi", "octet"}
+	rrq := RequestPacket{RRQ, remoteFileName, "octet"}
 	return sendRequest(rrq)
 }
 
