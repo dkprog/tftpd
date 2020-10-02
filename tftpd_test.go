@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 const ServerAddr = "127.0.0.1:69"
 const VideoFileMD5Hash = "edda8bd80133569937aeef64ebbf4f0c"
+const LocalVideoFileName = "video.avi"
 
 const (
 	RRQ   = 1
@@ -36,6 +38,7 @@ const (
 )
 
 type RequestPacket struct {
+	opcode   uint16
 	filename string
 	mode     string
 }
@@ -43,7 +46,7 @@ type RequestPacket struct {
 func (rrq RequestPacket) MarshalBinary() ([]byte, error) {
 	var packet bytes.Buffer
 	var opcode [2]byte
-	binary.BigEndian.PutUint16(opcode[:], RRQ)
+	binary.BigEndian.PutUint16(opcode[:], rrq.opcode)
 	packet.Write(opcode[:])
 	packet.Write([]byte(rrq.filename))
 	packet.Write([]byte{0})
@@ -72,6 +75,18 @@ func (pkt *DataPacket) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
+func (pkt DataPacket) MarshalBinary() ([]byte, error) {
+	var opcode [2]byte
+	binary.BigEndian.PutUint16(opcode[:], DATA)
+	var blockNumber [2]byte
+	binary.BigEndian.PutUint16(blockNumber[:], pkt.blockNumber)
+	var packet bytes.Buffer
+	packet.Write(opcode[:])
+	packet.Write(blockNumber[:])
+	packet.Write(pkt.data[:pkt.length])
+	return packet.Bytes(), nil
+}
+
 type AckPacket struct {
 	blockNumber uint16
 }
@@ -85,6 +100,18 @@ func (ack AckPacket) MarshalBinary() ([]byte, error) {
 	packet.Write(opcode[:])
 	packet.Write(blockNumber[:])
 	return packet.Bytes(), nil
+}
+
+func (ack *AckPacket) UnmarshalBinary(data []byte) error {
+	if len(data) < 4 {
+		return errors.New("too small packet")
+	}
+	opcode := binary.BigEndian.Uint16(data[0:])
+	if opcode != ACK {
+		return errors.New("invalid packet type")
+	}
+	ack.blockNumber = binary.BigEndian.Uint16(data[2:])
+	return nil
 }
 
 type ErrorPacket struct {
@@ -124,8 +151,74 @@ func randSeq(n int) string {
 }
 
 func TestWriteSendEntireFile(t *testing.T) {
-	t.Log(remoteFileName)
 
+	f, err := os.Open(LocalVideoFileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer f.Close()
+
+	conn, err := sendWriteRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var ack AckPacket
+
+	addr, buf, n, err := readPacket(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(buf[:n])
+
+	err = ack.UnmarshalBinary(buf[:n])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if ack.blockNumber != 0 {
+		t.Fatalf("Invalid ACK block number of %v. Expected zero.",
+			ack.blockNumber)
+	}
+
+	chunk := make([]byte, 512)
+	lastBlockNumber := uint16(1)
+
+	for ; ; lastBlockNumber++ {
+		n, err = f.Read(chunk)
+		if err != nil && err != io.EOF {
+			t.Fatal(err)
+		}
+
+		data := DataPacket{lastBlockNumber, chunk[:n], n}
+		_, err = sendData(data, addr, conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, buf, n, err = readPacket(conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var ack AckPacket
+		err = ack.UnmarshalBinary(buf[:n])
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if ack.blockNumber != data.blockNumber {
+			t.Fatalf("Invalid block number of %v. Expected ack %v",
+				ack.blockNumber, data.blockNumber)
+		}
+
+		if data.length < 512 {
+			break
+		}
+
+		f.Seek(int64(lastBlockNumber)*512, 0)
+	}
 }
 
 func TestReadReceiveFirstChunk(t *testing.T) {
@@ -275,7 +368,7 @@ func TestReadReceiveEntireFile(t *testing.T) {
 }
 
 func TestReadErrorFileNotFound(t *testing.T) {
-	rrq := RequestPacket{"not-found-video.avi", "octet"}
+	rrq := RequestPacket{RRQ, "not-found-video.avi", "octet"}
 
 	conn, err := sendRequest(rrq)
 	if err != nil {
@@ -302,12 +395,12 @@ func TestReadErrorFileNotFound(t *testing.T) {
 }
 
 func sendReadRequest() (conn net.PacketConn, err error) {
-	rrq := RequestPacket{"video.avi", "octet"}
+	rrq := RequestPacket{RRQ, "video.avi", "octet"}
 	return sendRequest(rrq)
 }
 
 func sendWriteRequest() (conn net.PacketConn, err error) {
-	wrq := RequestPacket{remoteFileName, "octet"}
+	wrq := RequestPacket{WRQ, remoteFileName, "octet"}
 	return sendRequest(wrq)
 }
 
@@ -345,6 +438,16 @@ func readPacket(conn net.PacketConn) (addr net.Addr, buf []byte, n int, err erro
 
 func sendAck(ack AckPacket, addr net.Addr, conn net.PacketConn) (n int, err error) {
 	packet, err := ack.MarshalBinary()
+	if err != nil {
+		return n, err
+	}
+
+	n, err = conn.WriteTo(packet, addr)
+	return n, err
+}
+
+func sendData(data DataPacket, addr net.Addr, conn net.PacketConn) (n int, err error) {
+	packet, err := data.MarshalBinary()
 	if err != nil {
 		return n, err
 	}
